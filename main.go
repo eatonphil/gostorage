@@ -140,6 +140,7 @@ func (l *appendOnlyLog) close() {
 }
 
 func (l *appendOnlyLog) insert(key, value []byte) {
+	// Seek to end
 	_, err := l.db.Seek(0, 2)
 	if err != nil {
 		panic(err)
