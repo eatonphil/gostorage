@@ -1,17 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"bytes"
-	"io"
 	"encoding/binary"
-	"os"
+	"fmt"
+	"io"
 	"math/rand"
+	"os"
 	"time"
 )
 
 type logEntry struct {
-	key []byte
+	key   []byte
 	value []byte
 }
 
@@ -20,8 +20,8 @@ const CHUNK_SIZE = 4096
 
 // Writes in 4096 byte chunks
 func (le *logEntry) write(w io.Writer) {
-	nChunks := (16 + len(le.key) + len(le.value)) / CHUNK_SIZE + 1
-	chunks := make([]byte, nChunks * CHUNK_SIZE)
+	nChunks := (16+len(le.key)+len(le.value))/CHUNK_SIZE + 1
+	chunks := make([]byte, nChunks*CHUNK_SIZE)
 
 	// Key first: 8 byte length prefix + actual key
 	binary.LittleEndian.PutUint64(chunks, uint64(len(le.key)))
@@ -29,7 +29,7 @@ func (le *logEntry) write(w io.Writer) {
 
 	// Value next: 8 byte length prefix + actual value
 	binary.LittleEndian.PutUint64(chunks[8+len(le.key):], uint64(len(le.key)))
-	copy(chunks[8+len(le.key) +8:], le.value)
+	copy(chunks[8+len(le.key)+8:], le.value)
 
 	// Write chunks to disk
 	offset := 0
@@ -43,7 +43,7 @@ func (le *logEntry) write(w io.Writer) {
 	}
 }
 
-func (le logEntry) readChunk(r io.Reader, chunk [CHUNK_SIZE]byte) bool {
+func (le logEntry) readChunk(r io.Reader, chunk *[CHUNK_SIZE]byte) bool {
 	var nRead int
 	for nRead < CHUNK_SIZE {
 		n, err := r.Read(chunk[nRead:])
@@ -61,11 +61,11 @@ func (le logEntry) readChunk(r io.Reader, chunk [CHUNK_SIZE]byte) bool {
 	return false
 }
 
-func (le logEntry) copyUntil(r io.Reader, into []byte, nBytes uint64, chunk [CHUNK_SIZE]byte, initialOffset int) int {
+func (le logEntry) copyUntil(r io.Reader, into []byte, nBytes uint64, chunk *[CHUNK_SIZE]byte, initialOffset int) int {
 	bytesRemainingInLastChunk := 0
-	if nBytes <= uint64(CHUNK_SIZE - initialOffset) {
+	if nBytes <= uint64(CHUNK_SIZE-initialOffset) {
 		// int(nBytes) conversion here is fine because it's definitely a small size
-		copy(into, chunk[initialOffset:initialOffset + int(nBytes)])
+		copy(into, chunk[initialOffset:initialOffset+int(nBytes)])
 		bytesRemainingInLastChunk = CHUNK_SIZE - (initialOffset + int(nBytes))
 	} else {
 		copy(into, chunk[initialOffset:])
@@ -93,7 +93,7 @@ func (le logEntry) copyUntil(r io.Reader, into []byte, nBytes uint64, chunk [CHU
 func (le *logEntry) read(r io.Reader) bool {
 	// Grab the first chunk (to at least get the key size and first N bytes).
 	var chunk [CHUNK_SIZE]byte
-	eof := le.readChunk(r, chunk)
+	eof := le.readChunk(r, &chunk)
 	if eof {
 		return true
 	}
@@ -101,22 +101,22 @@ func (le *logEntry) read(r io.Reader) bool {
 	key := make([]byte, keySize)
 
 	// Grab the key
-	bytesRemainingInLastKeyChunk := le.copyUntil(r, key, keySize, chunk, 8)
+	bytesRemainingInLastKeyChunk := le.copyUntil(r, key, keySize, &chunk, 8)
 
 	// Grab enough bytes to determine the value size
 	var valueSizeBytes [8]byte
-	offset := CHUNK_SIZE - bytesRemainingInLastKeyChunk + 8
+	offset := CHUNK_SIZE - bytesRemainingInLastKeyChunk
 	copy(valueSizeBytes[:], chunk[offset:])
 	if bytesRemainingInLastKeyChunk < 8 {
-		le.readChunk(r, chunk)
-		copy(valueSizeBytes[bytesRemainingInLastKeyChunk:], chunk[:8 - bytesRemainingInLastKeyChunk])
+		le.readChunk(r, &chunk)
+		copy(valueSizeBytes[bytesRemainingInLastKeyChunk:], chunk[:8-bytesRemainingInLastKeyChunk])
 		offset = 8 - bytesRemainingInLastKeyChunk
 	}
 	valueSize := binary.LittleEndian.Uint64(valueSizeBytes[:])
 
 	// Grab the value
 	value := make([]byte, valueSize)
-	le.copyUntil(r, value, valueSize, chunk, offset)
+	le.copyUntil(r, value, valueSize, &chunk, offset+8)
 
 	le.key = key
 	le.value = value
@@ -129,7 +129,7 @@ type appendOnlyLog struct {
 
 func (l *appendOnlyLog) init(dir string) {
 	var err error
-	l.db, err = os.OpenFile(dir + "/data.wal", os.O_CREATE | os.O_RDWR, 0644)
+	l.db, err = os.OpenFile(dir+"/data.wal", os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -161,7 +161,7 @@ func (l *appendOnlyLog) lookup(key []byte) ([]byte, error) {
 	}
 
 	entry := logEntry{}
-	for entry.read(l.db) {
+	for !entry.read(l.db) {
 		if bytes.Equal(entry.key, key) {
 			return entry.value, nil
 		}
@@ -190,9 +190,10 @@ func main() {
 	l.init("data")
 
 	fmt.Println("Generating random data")
-	entries := [1000][16]byte{}
+	entries := [100_000][16]byte{}
 	for i := range entries {
 		entries[i] = random16Bytes()
+		fmt.Printf("generated: %x\n", entries[i])
 	}
 	fmt.Println("Done generating random data")
 
@@ -215,7 +216,7 @@ func main() {
 			panic(err)
 		}
 		if !bytes.Equal(res, entry[:]) {
-			panic(fmt.Sprintf("Key: %#v not equal to value: %#v", res, entry))
+			panic(fmt.Sprintf("Key: %x not equal to value: %x", res, entry))
 		}
 	}
 }
