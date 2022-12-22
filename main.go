@@ -190,7 +190,7 @@ func main() {
 	l.init("data")
 
 	fmt.Println("Generating random data")
-	entries := [100_000][16]byte{}
+	entries := [1000][16]byte{}
 	for i := range entries {
 		entries[i] = random16Bytes()
 		fmt.Printf("generated: %x\n", entries[i])
@@ -206,12 +206,13 @@ func main() {
 
 	fmt.Println("Querying data")
 	querySamples := 100
+	avg := 0 * time.Second
 	for i := 0; i < querySamples; i++ {
 		rand.Seed(time.Now().UnixNano())
 		entry := entries[rand.Intn(len(entries))]
 		t1 := time.Now()
 		res, err := l.lookup(entry[:])
-		fmt.Println(time.Now().Sub(t1))
+		avg += time.Now().Sub(t1)
 		if err != nil {
 			panic(err)
 		}
@@ -219,4 +220,5 @@ func main() {
 			panic(fmt.Sprintf("Key: %x not equal to value: %x", res, entry))
 		}
 	}
+	fmt.Println(avg / time.Duration(querySamples))
 }
