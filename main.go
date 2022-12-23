@@ -16,7 +16,7 @@ type logEntry struct {
 }
 
 // Minimum size to read/write to/from disk.
-const CHUNK_SIZE = 4096
+const CHUNK_SIZE = 4096 * 4
 
 // Writes in 4096 byte chunks
 func (le *logEntry) write(w io.Writer) {
@@ -72,12 +72,13 @@ func (le logEntry) copyUntil(r io.Reader, into []byte, nBytes uint64, chunk *[CH
 		nBytes -= uint64(CHUNK_SIZE - initialOffset)
 
 		offset := CHUNK_SIZE - initialOffset
-		for nBytes > 0 {
+		for {
 			le.readChunk(r, chunk)
 			if nBytes < CHUNK_SIZE {
 				copy(into[offset:], chunk[:nBytes])
-				// Eventually nBytes will be small enough that this conversion will be correct
+				// In this case, nBytes will be small enough that this conversion is not wrong
 				bytesRemainingInLastChunk = CHUNK_SIZE - int(nBytes)
+				break
 			} else {
 				copy(into[offset:], chunk[:])
 				bytesRemainingInLastChunk = 0
@@ -170,16 +171,21 @@ func (l *appendOnlyLog) lookup(key []byte) ([]byte, error) {
 	return nil, fmt.Errorf("Key not found")
 }
 
-func random16Bytes() [16]byte {
+func randomBytes(n int) []byte {
 	fd, err := os.Open("/dev/random")
 	if err != nil {
 		panic(err)
 	}
 
-	var out [16]byte
-	_, err = fd.Read(out[:])
-	if err != nil {
-		panic(err)
+	out := make([]byte, n)
+	allRead := 0
+	for allRead < n {
+		read, err := fd.Read(out[:])
+		if err != nil {
+			panic(err)
+		}
+
+		allRead += read
 	}
 
 	return out
@@ -190,10 +196,10 @@ func main() {
 	l.init("data")
 
 	fmt.Println("Generating random data")
-	entries := [1000][16]byte{}
+	entries := [10000][]byte{}
 	for i := range entries {
-		entries[i] = random16Bytes()
-		fmt.Printf("generated: %x\n", entries[i])
+		entries[i] = randomBytes(5000)
+		//fmt.Printf("generated: %x .. %x\n", entries[i][:5], entries[i][9995:])
 	}
 	fmt.Println("Done generating random data")
 
@@ -205,7 +211,7 @@ func main() {
 	fmt.Println("Done inserting data")
 
 	fmt.Println("Querying data")
-	querySamples := 100
+	querySamples := 1000
 	avg := 0 * time.Second
 	for i := 0; i < querySamples; i++ {
 		rand.Seed(time.Now().UnixNano())
